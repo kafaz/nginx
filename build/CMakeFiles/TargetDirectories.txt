@@ -1,0 +1,7 @@
+/mnt/d/repos/nginx/build/CMakeFiles/nginx.dir
+/mnt/d/repos/nginx/build/CMakeFiles/edit_cache.dir
+/mnt/d/repos/nginx/build/CMakeFiles/rebuild_cache.dir
+/mnt/d/repos/nginx/build/CMakeFiles/list_install_components.dir
+/mnt/d/repos/nginx/build/CMakeFiles/install.dir
+/mnt/d/repos/nginx/build/CMakeFiles/install/local.dir
+/mnt/d/repos/nginx/build/CMakeFiles/install/strip.dir

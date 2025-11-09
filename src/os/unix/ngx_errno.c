@@ -94,14 +94,14 @@ ngx_strerror(ngx_err_t err, u_char *errstr, size_t size)
 ngx_int_t
 ngx_strerror_init(void)
 {
-    char       *msg;
-    u_char     *p;
-    size_t      len;
-    ngx_err_t   err;
+    char       *msg;   /* strerror() 返回的原始提示字符串 */
+    u_char     *p;     /* 指向复制后的错误信息缓冲区 */
+    size_t      len;   /* 暂存长度或申请内存大小 */
+    ngx_err_t   err;   /* 当前探测或填充的错误号 */
 
 #if (NGX_SYS_NERR)
-    ngx_first_error = 0;
-    ngx_last_error = NGX_SYS_NERR;
+    ngx_first_error = 0;          /* glibc 等平台直接提供错误数量 */
+    ngx_last_error = NGX_SYS_NERR; /* 以 sys_nerr 作为上界 */
 
 #elif (EPERM > 1000 && EPERM < 0x7fffffff - 1000)
 
@@ -113,17 +113,17 @@ ngx_strerror_init(void)
      */
 
     for (err = EPERM; err > EPERM - 1000; err--) {
-        ngx_set_errno(0);
-        msg = strerror(err);
+        ngx_set_errno(0);         /* 清 errno 便于判断 strerror 结果 */
+        msg = strerror(err);      /* 尝试读取当前错误号的描述 */
 
-        if (errno == EINVAL
+        if (errno == EINVAL       /* strerror() 报告该错误号无效 */
             || msg == NULL
             || strncmp(msg, "Unknown error", 13) == 0)
         {
             continue;
         }
 
-        ngx_first_error = err;
+        ngx_first_error = err;    /* 找到最小有效错误号 */
     }
 
     for (err = EPERM; err < EPERM + 1000; err++) {
@@ -137,7 +137,7 @@ ngx_strerror_init(void)
             continue;
         }
 
-        ngx_last_error = err + 1;
+        ngx_last_error = err + 1; /* 记录最大有效错误号的后一位作为上界 */
     }
 
 #else
@@ -171,37 +171,37 @@ ngx_strerror_init(void)
      */
 
     len = (ngx_last_error - ngx_first_error) * sizeof(ngx_str_t);
-
+    /* 为缓存的 ngx_str_t 列表整体分配内存 */
     ngx_sys_errlist = malloc(len);
     if (ngx_sys_errlist == NULL) {
         goto failed;
     }
 
     for (err = ngx_first_error; err < ngx_last_error; err++) {
-        msg = strerror(err);
+        msg = strerror(err); /* 取出每个错误号对应的字符串 */
 
         if (msg == NULL) {
             ngx_sys_errlist[err - ngx_first_error] = ngx_unknown_error;
             continue;
         }
 
-        len = ngx_strlen(msg);
+        len = ngx_strlen(msg); /* 计算字符串长度 */
 
-        p = malloc(len);
+        p = malloc(len); /* 精确分配所需大小 */
         if (p == NULL) {
             goto failed;
         }
 
-        ngx_memcpy(p, msg, len);
-        ngx_sys_errlist[err - ngx_first_error].len = len;
-        ngx_sys_errlist[err - ngx_first_error].data = p;
+        ngx_memcpy(p, msg, len); /* 拷贝原始 strerror() 的内容 */
+        ngx_sys_errlist[err - ngx_first_error].len = len;  /* 记录长度 */
+        ngx_sys_errlist[err - ngx_first_error].data = p;   /* 保存数据指针 */
     }
 
     return NGX_OK;
 
 failed:
 
-    err = errno;
+    err = errno; /* 失败时保留 errno 便于日志诊断 */
     ngx_log_stderr(0, "malloc(%uz) failed (%d: %s)", len, err, strerror(err));
 
     return NGX_ERROR;

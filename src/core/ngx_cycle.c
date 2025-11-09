@@ -1020,6 +1020,34 @@ ngx_init_zone_pool(ngx_cycle_t *cycle, ngx_shm_zone_t *zn)
 }
 
 
+/**
+ * 函数功能：创建PID文件，将Master进程的进程ID写入文件
+ * 
+ * 参数说明：
+ *   @param name: PID文件路径
+ *   @param log: 日志对象，用于记录错误信息
+ * 
+ * 返回值：
+ *   @return NGX_OK: 创建成功
+ *   @return NGX_ERROR: 创建失败
+ * 
+ * PID文件作用：
+ *   1. 进程标识：存储Master进程的PID，用于标识NGINX进程
+ *   2. 进程管理：通过读取PID文件获取Master进程PID，用于发送信号管理进程
+ *      - nginx -s stop/reload/quit/reopen 命令需要读取PID文件
+ *   3. 进程检测：通过检查PID文件是否存在来判断NGINX是否运行
+ *   4. 热升级支持：热升级时将PID文件重命名为.oldbin，新进程创建新的PID文件
+ * 
+ * 创建时机：
+ *   - 只在Master进程或单进程模式下创建，Worker进程不创建
+ *   - 在守护进程化（daemon）之后创建，确保写入的是守护进程的PID
+ *   - 如果PID文件已存在，会被覆盖（使用NGX_FILE_TRUNCATE模式）
+ * 
+ * 文件格式：
+ *   - 文件内容：Master进程的PID（整数，如 "12345"）
+ *   - 文件格式：纯文本，只包含PID数字和换行符
+ *   - 文件路径：默认 /var/run/nginx.pid（可通过pid指令配置）
+ */
 ngx_int_t
 ngx_create_pidfile(ngx_str_t *name, ngx_log_t *log)
 {
@@ -1029,6 +1057,9 @@ ngx_create_pidfile(ngx_str_t *name, ngx_log_t *log)
     ngx_file_t  file;
     u_char      pid[NGX_INT64_LEN + 2];
 
+    /* 只在Master进程或单进程模式下创建PID文件
+     * Worker进程不创建PID文件，因为它们不是主进程
+     */
     if (ngx_process > NGX_PROCESS_MASTER) {
         return NGX_OK;
     }
@@ -1038,8 +1069,13 @@ ngx_create_pidfile(ngx_str_t *name, ngx_log_t *log)
     file.name = *name;
     file.log = log;
 
+    /* 确定文件打开模式
+     * - 配置测试模式：NGX_FILE_CREATE_OR_OPEN（创建或打开，不截断）
+     * - 正常运行模式：NGX_FILE_TRUNCATE（截断，覆盖已存在的文件）
+     */
     create = ngx_test_config ? NGX_FILE_CREATE_OR_OPEN : NGX_FILE_TRUNCATE;
 
+    /* 打开PID文件（读写模式） */
     file.fd = ngx_open_file(file.name.data, NGX_FILE_RDWR,
                             create, NGX_FILE_DEFAULT_ACCESS);
 
@@ -1051,14 +1087,22 @@ ngx_create_pidfile(ngx_str_t *name, ngx_log_t *log)
 
     rc = NGX_OK;
 
+    /* 写入PID（只在非配置测试模式下）
+     * - %P: 格式化进程ID（ngx_pid）
+     * - %N: 换行符
+     */
     if (!ngx_test_config) {
         len = ngx_snprintf(pid, NGX_INT64_LEN + 2, "%P%N", ngx_pid) - pid;
 
+        /* 写入PID到文件
+         * 文件内容示例：12345\n
+         */
         if (ngx_write_file(&file, pid, len, 0) == NGX_ERROR) {
             rc = NGX_ERROR;
         }
     }
 
+    /* 关闭文件 */
     if (ngx_close_file(file.fd) == NGX_FILE_ERROR) {
         ngx_log_error(NGX_LOG_ALERT, log, ngx_errno,
                       ngx_close_file_n " \"%s\" failed", file.name.data);
@@ -1068,6 +1112,25 @@ ngx_create_pidfile(ngx_str_t *name, ngx_log_t *log)
 }
 
 
+/**
+ * 函数功能：删除PID文件
+ * 
+ * 参数说明：
+ *   @param cycle: 当前cycle对象
+ * 
+ * 删除时机：
+ *   - Master进程退出时调用
+ *   - 进程正常关闭时调用
+ *   - 在ngx_master_process_exit()函数中调用
+ * 
+ * 删除逻辑：
+ *   - 热升级场景：删除oldpid文件（ngx_new_binary为真）
+ *   - 正常退出：删除pid文件（ngx_new_binary为假）
+ * 
+ * 注意：
+ *   - 如果删除失败，只记录日志，不阻止进程退出
+ *   - 进程退出后，PID文件可能仍然存在（如果删除失败）
+ */
 void
 ngx_delete_pidfile(ngx_cycle_t *cycle)
 {
@@ -1076,8 +1139,15 @@ ngx_delete_pidfile(ngx_cycle_t *cycle)
 
     ccf = (ngx_core_conf_t *) ngx_get_conf(cycle->conf_ctx, ngx_core_module);
 
+    /* 确定要删除的PID文件
+     * - 热升级场景：删除oldpid文件（旧进程的PID文件）
+     * - 正常退出：删除pid文件（当前进程的PID文件）
+     */
     name = ngx_new_binary ? ccf->oldpid.data : ccf->pid.data;
 
+    /* 删除PID文件
+     * 如果删除失败，只记录日志，不阻止进程退出
+     */
     if (ngx_delete_file(name) == NGX_FILE_ERROR) {
         ngx_log_error(NGX_LOG_ALERT, cycle->log, ngx_errno,
                       ngx_delete_file_n " \"%s\" failed", name);
